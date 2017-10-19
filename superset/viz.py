@@ -32,7 +32,7 @@ from dateutil import relativedelta as rdelta
 
 from superset import app, utils, cache, get_manifest_file
 from superset.utils import DTTM_ALIAS, merge_extra_filters
-
+from math import isnan
 config = app.config
 stats_logger = config.get('STATS_LOGGER')
 
@@ -351,6 +351,10 @@ class TableViz(BaseViz):
     credits = 'a <a href="https://github.com/airbnb/superset">Superset</a> original'
     is_timeseries = False
 
+    def has_comparison_metrics(self):
+        fd = self.form_data
+        return fd.get('pop_comparison_metrics') and len(fd.get('pop_comparison_metrics')) > 0
+
     def should_be_timeseries(self):
         fd = self.form_data
         # TODO handle datasource-type-specific code in datasource
@@ -391,11 +395,97 @@ class TableViz(BaseViz):
                 fd['percent_metrics']
             ))
 
-        d['is_timeseries'] = self.should_be_timeseries()
+        # Add all metrics for which we have to do a period comparison
+        if self.has_comparison_metrics():
+            d['metrics'] = d['metrics'] + list(filter(
+                lambda m: m not in d['metrics'],
+                fd['pop_comparison_metrics']
+            ))
+
+            self.initial_from_dttm = d['from_dttm']
+            date_diff = d['to_dttm'] - d['from_dttm']
+            d['from_dttm'] = d['from_dttm'] - date_diff
+
+        d['is_timeseries'] = self.should_be_timeseries() or self.has_comparison_metrics()
         return d
+
+    def split_and_merge(self, df):
+        half_time = self.initial_from_dttm
+        df_pp = df[(df['__timestamp'] < half_time)]
+        df = df[(df['__timestamp'] >= half_time)]
+
+        df = df.pivot_table(
+            index=self.form_data.get('groupby'),
+            columns=self.form_data.get('columns'),
+            values=self.form_data.get('metrics'),
+            aggfunc=sum,
+            margins=False,
+            fill_value=0
+        )
+
+        df_pp = df_pp.pivot_table(
+            index=self.form_data.get('groupby'),
+            columns=self.form_data.get('columns'),
+            values=self.form_data.get('metrics'),
+            aggfunc=sum,
+            margins=False,
+            fill_value=0
+        )
+
+        non_pp_columns = np.setdiff1d(self.form_data.get('pop_comparison_metrics'), self.form_data.get('metrics'))
+
+        for metric in non_pp_columns:
+            del df_pp[metric]
+
+        group_by = self.form_data.get('groupby')
+        pp_suffix = '_pp'
+        delta_suffix = '_delta'
+
+        try:
+            df_merged = df.merge(df_pp, left_on=group_by, right_on=group_by, how='left', indicator=False, suffixes=['', pp_suffix])
+            df_merged = df_merged.applymap(lambda x: 0 if isinstance(x, float) and isnan(x) else x)
+        except:
+            df_merged = df
+            metrics = self.form_data['metrics']
+
+            for metric in self.form_data.get('pop_comparison_metrics'):
+                df_merged[metric + pp_suffix] = 0
+
+        df_merged = df_merged.assign(**{key + delta_suffix: 0 for key in self.form_data.get('pop_comparison_metrics')})
+        idx_list = [(df_merged.columns.get_loc(key), df_merged.columns.get_loc(key + pp_suffix), df_merged.columns.get_loc(key + delta_suffix)) for key in self.form_data.get('pop_comparison_metrics')]
+
+        cols = [x for x in df_merged.columns.tolist() if not x.endswith(pp_suffix)]
+        cols.sort()
+        return df_merged.apply(self.compute_change, axis=1, raw=True, args=[idx_list])[cols].reset_index()
+
+    def compute_change(self, data, idx_list):
+        for key, key_pp, key_delta in idx_list:
+            dd = self.delta_change(data[key], data[key_pp])
+            data[key_delta] = dd
+
+        return data
+
+    def delta_change(self, val, pp_val):
+        if isnan(val):
+            val = 0
+
+        if isnan(pp_val):
+            pp_val = 0
+
+        if pp_val == 0 and val == 0:
+            return 0
+
+        if pp_val == 0:
+            return 1
+
+        return (val - pp_val) / pp_val
 
     def get_data(self, df):
         fd = self.form_data
+
+        if not self.should_be_timeseries() and self.has_comparison_metrics():
+            df = self.split_and_merge(df)
+
         if not self.should_be_timeseries() and DTTM_ALIAS in df:
             del df[DTTM_ALIAS]
 

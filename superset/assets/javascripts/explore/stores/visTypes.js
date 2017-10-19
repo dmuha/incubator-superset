@@ -338,8 +338,8 @@ export const visTypes = {
         label: t('GROUP BY'),
         description: t('Use this section if you want a query that aggregates'),
         controlSetRows: [
-          ['groupby'],
-          ['metrics', 'percent_metrics'],
+          ['groupby', 'metrics'],
+          ['percent_metrics', 'pop_comparison_metrics'],
           ['include_time'],
           ['timeseries_limit_metric', 'order_desc'],
         ],

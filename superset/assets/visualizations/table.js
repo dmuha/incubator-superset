@@ -19,8 +19,15 @@ function tableVis(slice, payload) {
   let metrics = fd.metrics || [];
   // Add percent metrics
   metrics = metrics.concat((fd.percent_metrics || []).map(m => '%' + m));
+  metrics = metrics.concat((fd.pop_comparison_metrics || []).map(m => m + '_delta'));
   // Removing metrics (aggregates) that are strings
   metrics = metrics.filter(m => !isNaN(data.records[0][m]));
+
+  function isDeltaColumn(c){
+    var d_idx = c.indexOf('_delta');
+    var d_len = '_delta'.length;
+    return d_idx > 0 && (c.length - d_len) == d_idx;
+  }
 
   function col(c) {
     const arr = [];
@@ -54,6 +61,12 @@ function tableVis(slice, payload) {
       const cName = c.substring(1);
       return '% ' + (verboseMap[cName] || cName);
     }
+
+    if (isDeltaColumn(c)) {
+      const cName = c.substring(0, c.length - 6);
+      return 'P/P ' + (verboseMap[cName] || cName);
+    }
+
     return c;
   });
 
@@ -86,6 +99,9 @@ function tableVis(slice, payload) {
         html = slice.d3format(c, val);
       }
       if (c[0] === '%') {
+        html = d3.format('.3p')(val);
+      }
+      if (isDeltaColumn(c)) {
         html = d3.format('.3p')(val);
       }
       return {

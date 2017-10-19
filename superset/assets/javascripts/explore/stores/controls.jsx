@@ -113,6 +113,19 @@ export const controls = {
     description: t('Metrics for which percentage of total are to be displayed'),
   },
 
+  pop_comparison_metrics: {
+    type: 'SelectControl',
+    multi: true,
+    label: t('Period Comparison Metrics'),
+    valueKey: 'metric_name',
+    optionRenderer: m => <MetricOption metric={m} />,
+    valueRenderer: m => <MetricOption metric={m} />,
+    mapStateToProps: state => ({
+        options: (state.datasource) ? state.datasource.metrics : [],
+    }),
+    description: t('Metrics for which percentage of total are to be displayed'),
+  },
+
   y_axis_bounds: {
     type: 'BoundsControl',
     label: t('Y Axis Bounds'),
